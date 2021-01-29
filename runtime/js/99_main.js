@@ -397,8 +397,10 @@ delete Object.prototype.__proto__;
     const { unstableFlag, pid, noColor, args, location: locationHref } =
       runtimeOptions;
 
-    location.setLocationHref(locationHref);
-    fetch.setBaseUrl(locationHref);
+    if (locationHref != null) {
+      location.setLocationHref(locationHref);
+      fetch.setBaseUrl(locationHref);
+    }
     registerErrors();
 
     getHostMessages();

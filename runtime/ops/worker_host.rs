@@ -4,10 +4,10 @@ use crate::permissions::resolve_fs_allowlist;
 use crate::permissions::PermissionState;
 use crate::permissions::Permissions;
 use crate::permissions::UnaryPermission;
-use crate::web_worker::run_web_worker;
-use crate::web_worker::WebWorker;
-use crate::web_worker::WebWorkerHandle;
-use crate::web_worker::WorkerEvent;
+use crate::worker::run_web_worker;
+use crate::worker::Worker;
+use crate::worker_communication::WorkerHandle;
+use crate::worker_communication::WorkerEvent;
 use deno_core::error::custom_error;
 use deno_core::error::AnyError;
 use deno_core::error::JsError;
@@ -42,10 +42,10 @@ pub struct CreateWebWorkerArgs {
 }
 
 pub type CreateWebWorkerCb =
-  dyn Fn(CreateWebWorkerArgs) -> WebWorker + Sync + Send;
+  dyn Fn(CreateWebWorkerArgs) -> Worker + Sync + Send;
 
 /// A holder for callback that is used to create a new
-/// WebWorker. It's a struct instead of a type alias
+/// Worker. It's a struct instead of a type alias
 /// because `GothamState` used in `OpState` overrides
 /// value if type alises have the same underlying type
 #[derive(Clone)]
@@ -53,7 +53,7 @@ pub struct CreateWebWorkerCbHolder(Arc<CreateWebWorkerCb>);
 
 pub struct WorkerThread {
   join_handle: JoinHandle<Result<(), AnyError>>,
-  worker_handle: WebWorkerHandle,
+  worker_handle: WorkerHandle,
 }
 
 pub type WorkersTable = HashMap<u32, WorkerThread>;
@@ -67,7 +67,7 @@ pub fn init(
     let op_state = rt.op_state();
     let mut state = op_state.borrow_mut();
     state.put::<WorkersTable>(WorkersTable::default());
-    state.put::<WorkerId>(WorkerId::default());
+    state.put::<WorkerId>(1);
 
     let create_module_loader = CreateWebWorkerCbHolder(create_web_worker_cb);
     state.put::<CreateWebWorkerCbHolder>(create_module_loader);
@@ -433,6 +433,7 @@ fn op_create_worker(
   args: Value,
   _data: &mut [ZeroCopyBuf],
 ) -> Result<Value, AnyError> {
+  // Parse worker creation arguments
   let args: CreateWorkerArgs = serde_json::from_value(args)?;
 
   let specifier = args.specifier.clone();
@@ -454,6 +455,7 @@ fn op_create_worker(
     parent_permissions.clone()
   };
 
+  // Create worker
   let worker_id = state.take::<WorkerId>();
   let create_module_loader = state.take::<CreateWebWorkerCbHolder>();
   state.put::<CreateWebWorkerCbHolder>(create_module_loader.clone());
@@ -463,7 +465,7 @@ fn op_create_worker(
   let worker_name = args_name.unwrap_or_else(|| "".to_string());
 
   let (handle_sender, handle_receiver) =
-    std::sync::mpsc::sync_channel::<Result<WebWorkerHandle, AnyError>>(1);
+    std::sync::mpsc::sync_channel::<Result<WorkerHandle, AnyError>>(1);
 
   // Setup new thread
   let thread_builder =
@@ -496,7 +498,7 @@ fn op_create_worker(
     run_web_worker(worker, module_specifier, maybe_source_code)
   })?;
 
-  // Receive WebWorkerHandle from newly created worker
+  // Receive WorkerHandle from newly created worker
   let worker_handle = handle_receiver.recv().unwrap()?;
 
   let worker_thread = WorkerThread {

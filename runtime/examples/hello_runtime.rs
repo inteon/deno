@@ -4,7 +4,7 @@ use deno_core::error::AnyError;
 use deno_core::FsModuleLoader;
 use deno_core::ModuleSpecifier;
 use deno_runtime::permissions::Permissions;
-use deno_runtime::worker::MainWorker;
+use deno_runtime::worker::Worker;
 use deno_runtime::worker::WorkerOptions;
 use std::path::Path;
 use std::rc::Rc;
@@ -40,6 +40,7 @@ async fn main() -> Result<(), AnyError> {
     no_color: false,
     get_error_class_fn: Some(&get_error_class_name),
     location: None,
+    use_deno_namespace: true,
   };
 
   let js_path =
@@ -47,8 +48,13 @@ async fn main() -> Result<(), AnyError> {
   let main_module = ModuleSpecifier::resolve_path(&js_path.to_string_lossy())?;
   let permissions = Permissions::allow_all();
 
-  let mut worker =
-    MainWorker::from_options(main_module.clone(), permissions, &options);
+  let mut worker = Worker::from_options(
+    0,
+    "main".to_string(),
+    permissions,
+    main_module.clone(),
+    &options
+  );
   worker.bootstrap(&options);
   worker.execute_module(&main_module).await?;
   worker.run_event_loop().await?;

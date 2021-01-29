@@ -9,7 +9,7 @@ use deno_core::error::AnyError;
 use deno_core::serde_json::json;
 use deno_core::serde_json::Value;
 use deno_runtime::inspector::InspectorSession;
-use deno_runtime::worker::MainWorker;
+use deno_runtime::worker::Worker;
 use rustyline::completion::Completer;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -260,7 +260,7 @@ impl Highlighter for LineHighlighter {
 }
 
 async fn post_message_and_poll(
-  worker: &mut MainWorker,
+  worker: &mut Worker,
   session: &mut InspectorSession,
   method: &str,
   params: Option<Value>,
@@ -285,7 +285,7 @@ async fn post_message_and_poll(
 }
 
 async fn read_line_and_poll(
-  worker: &mut MainWorker,
+  worker: &mut Worker,
   session: &mut InspectorSession,
   message_rx: &Receiver<(String, Option<Value>)>,
   response_tx: &Sender<Result<Value, AnyError>>,
@@ -356,7 +356,7 @@ Object.defineProperty(globalThis, "_error", {
 "#;
 
 async fn inject_prelude(
-  worker: &mut MainWorker,
+  worker: &mut Worker,
   session: &mut InspectorSession,
   context_id: u64,
 ) -> Result<(), AnyError> {
@@ -375,7 +375,7 @@ async fn inject_prelude(
 }
 
 pub async fn is_closing(
-  worker: &mut MainWorker,
+  worker: &mut Worker,
   session: &mut InspectorSession,
   context_id: u64,
 ) -> Result<bool, AnyError> {
@@ -401,7 +401,7 @@ pub async fn is_closing(
 
 pub async fn run(
   program_state: &ProgramState,
-  mut worker: MainWorker,
+  mut worker: Worker,
 ) -> Result<(), AnyError> {
   let mut session = worker.create_inspector_session();
 

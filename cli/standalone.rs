@@ -16,7 +16,7 @@ use deno_core::ModuleSpecifier;
 use deno_core::OpState;
 use deno_runtime::permissions::Permissions;
 use deno_runtime::permissions::PermissionsOptions;
-use deno_runtime::worker::MainWorker;
+use deno_runtime::worker::Worker;
 use deno_runtime::worker::WorkerOptions;
 use log::Level;
 use std::cell::RefCell;
@@ -188,9 +188,15 @@ pub async fn run(
     no_color: !colors::use_color(),
     get_error_class_fn: Some(&get_error_class_name),
     location: metadata.location,
+    use_deno_namespace: true,
   };
-  let mut worker =
-    MainWorker::from_options(main_module.clone(), permissions, &options);
+  let mut worker = Worker::from_options(
+    0,
+    "main".to_string(),
+    permissions,
+    main_module.clone(),
+    &options
+  );
   worker.bootstrap(&options);
   worker.execute_module(&main_module).await?;
   worker.execute("window.dispatchEvent(new Event('load'))")?;

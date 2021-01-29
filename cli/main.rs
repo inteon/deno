@@ -68,9 +68,7 @@ use deno_doc as doc;
 use deno_doc::parser::DocFileLoader;
 use deno_runtime::ops::worker_host::CreateWebWorkerCb;
 use deno_runtime::permissions::Permissions;
-use deno_runtime::web_worker::WebWorker;
-use deno_runtime::web_worker::WebWorkerOptions;
-use deno_runtime::worker::MainWorker;
+use deno_runtime::worker::Worker;
 use deno_runtime::worker::WorkerOptions;
 use log::Level;
 use log::LevelFilter;
@@ -106,7 +104,7 @@ fn create_web_worker_callback(
     let create_web_worker_cb =
       create_web_worker_callback(program_state.clone());
 
-    let options = WebWorkerOptions {
+    let options = WorkerOptions {
       args: program_state.flags.argv.clone(),
       apply_source_maps: true,
       debug_flag: program_state
@@ -127,13 +125,15 @@ fn create_web_worker_callback(
       ts_version: version::TYPESCRIPT.to_string(),
       no_color: !colors::use_color(),
       get_error_class_fn: Some(&crate::errors::get_error_class_name),
+      should_break_on_first_statement: false,
+      location: program_state.flags.location.clone()
     };
 
-    let mut worker = WebWorker::from_options(
+    let mut worker = Worker::from_options(
+      args.worker_id,
       args.name,
       args.permissions,
       args.main_module,
-      args.worker_id,
       &options,
     );
 
@@ -162,7 +162,7 @@ pub fn create_main_worker(
   program_state: &Arc<ProgramState>,
   main_module: ModuleSpecifier,
   permissions: Permissions,
-) -> MainWorker {
+) -> Worker {
   let module_loader = CliModuleLoader::new(program_state.clone());
 
   let global_state_ = program_state.clone();
@@ -204,9 +204,16 @@ pub fn create_main_worker(
     no_color: !colors::use_color(),
     get_error_class_fn: Some(&crate::errors::get_error_class_name),
     location: program_state.flags.location.clone(),
+    use_deno_namespace: true,
   };
 
-  let mut worker = MainWorker::from_options(main_module, permissions, &options);
+  let mut worker = Worker::from_options(
+    0,
+    "main".to_string(),
+    permissions,
+    main_module,
+    &options
+  );
 
   // This block registers additional ops and state that
   // are only available in the CLI
