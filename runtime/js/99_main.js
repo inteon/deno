@@ -133,7 +133,7 @@ delete Object.prototype.__proto__;
   function opPostMessage(data) {
     core.jsonOpSync("op_worker_post_message", {}, data);
   }
-  
+
   function opGetMessage() {
     return core.jsonOpAsync("op_worker_get_message", {});
   }

@@ -263,11 +263,9 @@ async fn get_tls_config(
         })
         .unwrap();
 
-      return Ok(Arc::new(config));
+      Ok(Arc::new(config))
     }
-    None => {
-      return Err(io::Error::new(io::ErrorKind::Other, "Cannot find key"));
-    }
+    None => Err(io::Error::new(io::ErrorKind::Other, "Cannot find key")),
   }
 }
 
@@ -334,11 +332,11 @@ async fn absolute_redirect(
 
   let file = tokio::fs::read(file_path).await.unwrap();
   let file_resp = custom_headers(req.uri().path(), file);
-  return Ok(file_resp);
+  Ok(file_resp)
 }
 
 async fn main_server(req: Request<Body>) -> hyper::Result<Response<Body>> {
-  return match (req.method(), req.uri().path()) {
+  match (req.method(), req.uri().path()) {
     (&hyper::Method::POST, "/echo_server") => {
       let (parts, body) = req.into_parts();
       let mut response = Response::new(body);
@@ -588,9 +586,9 @@ async fn main_server(req: Request<Body>) -> hyper::Result<Response<Body>> {
         return Ok(file_resp);
       }
 
-      return Ok(Response::new(Body::empty()));
+      Ok(Response::new(Body::empty()))
     }
-  };
+  }
 }
 
 /// Taken from example in https://github.com/ctz/hyper-rustls/blob/a02ef72a227dcdf102f86e905baa7415c992e8b3/examples/server.rs

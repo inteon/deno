@@ -11,8 +11,8 @@ use deno_core::serde_json;
 use deno_core::serde_json::json;
 use deno_core::serde_json::Value;
 use deno_core::ZeroCopyBuf;
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Deserialize)]
 struct HostUnhandledErrorArgs {
@@ -50,12 +50,11 @@ pub fn init(
     op_worker_close(&webworker_handle, sender_clone)
   });
 
-  let sender_clone1 = sender.clone();
   super::reg_json_sync(
     rt,
     "op_worker_unhandled_error",
     move |_state, args, _zero_copy| {
-      let sender_clone = sender_clone1.clone();
+      let sender_clone = sender.clone();
       op_worker_unhandled_error(args, sender_clone)
     },
   );

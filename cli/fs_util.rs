@@ -108,10 +108,10 @@ pub fn is_supported_ext_md(path: &Path) -> bool {
 
 /// Get the extension of a file in lowercase.
 pub fn get_extension(file_path: &Path) -> Option<String> {
-  return file_path
+  file_path
     .extension()
     .and_then(|e| e.to_str())
-    .map(|e| e.to_lowercase());
+    .map(|e| e.to_lowercase())
 }
 
 /// Collects file paths that satisfy the given predicate, by recursively walking `files`.

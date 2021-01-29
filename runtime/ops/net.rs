@@ -768,8 +768,8 @@ mod tests {
   fn rdata_to_return_record_txt() {
     let func = rdata_to_return_record(RecordType::TXT);
     let rdata = RData::TXT(TXT::from_bytes(vec![
-      "foo".as_bytes(),
-      "bar".as_bytes(),
+      b"foo",
+      b"bar",
       &[0xa3],             // "£" in Latin-1
       &[0xe3, 0x81, 0x82], // "あ" in UTF-8
     ]));
