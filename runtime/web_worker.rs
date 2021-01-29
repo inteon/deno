@@ -13,7 +13,6 @@ use deno_core::futures::channel::mpsc;
 use deno_core::futures::future::poll_fn;
 use deno_core::futures::future::FutureExt;
 use deno_core::futures::stream::StreamExt;
-use deno_core::futures::task::AtomicWaker;
 use deno_core::serde_json;
 use deno_core::serde_json::json;
 use deno_core::url::Url;
@@ -26,6 +25,7 @@ use deno_core::ModuleSpecifier;
 use deno_core::RuntimeOptions;
 use std::env;
 use std::rc::Rc;
+use std::cell::RefCell;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -41,9 +41,10 @@ pub enum WorkerEvent {
   TerminalError(AnyError),
 }
 
+// Channels used for communication with worker's parent
 pub struct WorkerChannelsInternal {
   pub sender: mpsc::Sender<WorkerEvent>,
-  pub receiver: mpsc::Receiver<Box<[u8]>>,
+  pub receiver: Rc<RefCell<mpsc::Receiver<Box<[u8]>>>>,
 }
 
 /// Wrapper for `WorkerHandle` that adds functionality
@@ -101,7 +102,7 @@ fn create_channels(
   let (out_tx, out_rx) = mpsc::channel::<WorkerEvent>(1);
   let internal_channels = WorkerChannelsInternal {
     sender: out_tx,
-    receiver: in_rx,
+    receiver: Rc::new(RefCell::new(in_rx)),
   };
   let external_channels = WebWorkerHandle {
     sender: in_tx,
@@ -120,13 +121,9 @@ fn create_channels(
 pub struct WebWorker {
   id: u32,
   inspector: Option<Box<DenoInspector>>,
-  // Following fields are pub because they are accessed
-  // when creating a new WebWorker instance.
-  pub(crate) internal_channels: WorkerChannelsInternal,
+  internal_channels: WorkerChannelsInternal,
   pub js_runtime: JsRuntime,
   pub name: String,
-  waker: AtomicWaker,
-  event_loop_idle: bool,
   terminate_rx: mpsc::Receiver<()>,
   handle: WebWorkerHandle,
   pub use_deno_namespace: bool,
@@ -193,8 +190,6 @@ impl WebWorker {
       internal_channels,
       js_runtime,
       name,
-      waker: AtomicWaker::new(),
-      event_loop_idle: false,
       terminate_rx,
       handle,
       use_deno_namespace: options.use_deno_namespace,
@@ -203,7 +198,6 @@ impl WebWorker {
 
     {
       let handle = worker.thread_safe_handle();
-      let sender = worker.internal_channels.sender.clone();
       let js_runtime = &mut worker.js_runtime;
       // All ops registered in this function depend on these
       {
@@ -216,7 +210,12 @@ impl WebWorker {
         });
       }
 
-      ops::web_worker::init(js_runtime, sender.clone(), handle);
+      ops::web_worker::init(
+        js_runtime,
+        worker.internal_channels.sender.clone(),
+        worker.internal_channels.receiver.clone(),
+        handle,
+      );
       ops::runtime::init(js_runtime, main_module);
       ops::fetch::init(
         js_runtime,
@@ -224,11 +223,7 @@ impl WebWorker {
         options.ca_data.clone(),
       );
       ops::timers::init(js_runtime);
-      ops::worker_host::init(
-        js_runtime,
-        Some(sender),
-        options.create_web_worker_cb.clone(),
-      );
+      ops::worker_host::init(js_runtime, options.create_web_worker_cb.clone());
       ops::reg_json_sync(js_runtime, "op_close", deno_core::op_close);
       ops::reg_json_sync(js_runtime, "op_resources", deno_core::op_resources);
       ops::reg_json_sync(
@@ -338,27 +333,23 @@ impl WebWorker {
       return Poll::Ready(Ok(()));
     }
 
-    if !self.event_loop_idle {
-      let poll_result = {
-        // We always poll the inspector if it exists.
-        let _ = self.inspector.as_mut().map(|i| i.poll_unpin(cx));
-        self.waker.register(cx.waker());
-        self.js_runtime.poll_event_loop(cx)
-      };
+    let poll_result = {
+      // We always poll the inspector if it exists.
+      let _ = self.inspector.as_mut().map(|i| i.poll_unpin(cx));
+      self.js_runtime.poll_event_loop(cx)
+    };
 
-      if let Poll::Ready(r) = poll_result {
-        if self.has_been_terminated() {
-          return Poll::Ready(Ok(()));
-        }
+    if let Poll::Ready(r) = poll_result {
+      if self.has_been_terminated() {
+        return Poll::Ready(Ok(()));
+      }
 
-        if let Err(e) = r {
-          print_worker_error(e.to_string(), &self.name);
-          let mut sender = self.internal_channels.sender.clone();
-          sender
-            .try_send(WorkerEvent::Error(e))
-            .expect("Failed to post message to host");
-        }
-        self.event_loop_idle = true;
+      if let Err(e) = r {
+        print_worker_error(e.to_string(), &self.name);
+        let mut sender = self.internal_channels.sender.clone();
+        sender
+          .try_send(WorkerEvent::Error(e))
+          .expect("Failed to propagate error event to parent worker");
       }
     }
 
@@ -366,34 +357,6 @@ impl WebWorker {
       // terminate_rx should never be closed
       assert!(r.is_some());
       return Poll::Ready(Ok(()));
-    }
-
-    let maybe_msg_poll_result =
-      self.internal_channels.receiver.poll_next_unpin(cx);
-
-    if let Poll::Ready(maybe_msg) = maybe_msg_poll_result {
-      let msg =
-        maybe_msg.expect("Received `None` instead of message in worker");
-      let msg = String::from_utf8(msg.to_vec()).unwrap();
-      let script = format!("workerMessageRecvCallback({})", msg);
-
-      if let Err(e) = self.execute(&script) {
-        // If execution was terminated during message callback then
-        // just ignore it
-        if self.has_been_terminated() {
-          return Poll::Ready(Ok(()));
-        }
-
-        // Otherwise forward error to host
-        let mut sender = self.internal_channels.sender.clone();
-        sender
-          .try_send(WorkerEvent::Error(e))
-          .expect("Failed to post message to host");
-      }
-
-      // Let event loop be polled again
-      self.event_loop_idle = false;
-      self.waker.wake();
     }
 
     Poll::Pending
@@ -458,7 +421,7 @@ pub fn run_web_worker(
     print_worker_error(e.to_string(), &name);
     sender
       .try_send(WorkerEvent::TerminalError(e))
-      .expect("Failed to post message to host");
+      .expect("Failed to propagate error event to parent worker");
 
     // Failure to execute script is a terminal error, bye, bye.
     return Ok(());

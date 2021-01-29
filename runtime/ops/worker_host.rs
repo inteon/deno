@@ -9,10 +9,8 @@ use crate::web_worker::WebWorker;
 use crate::web_worker::WebWorkerHandle;
 use crate::web_worker::WorkerEvent;
 use deno_core::error::custom_error;
-use deno_core::error::generic_error;
 use deno_core::error::AnyError;
 use deno_core::error::JsError;
-use deno_core::futures::channel::mpsc;
 use deno_core::serde::de;
 use deno_core::serde::de::SeqAccess;
 use deno_core::serde::Deserialize;
@@ -53,11 +51,6 @@ pub type CreateWebWorkerCb =
 #[derive(Clone)]
 pub struct CreateWebWorkerCbHolder(Arc<CreateWebWorkerCb>);
 
-#[derive(Deserialize)]
-struct HostUnhandledErrorArgs {
-  message: String,
-}
-
 pub struct WorkerThread {
   join_handle: JoinHandle<Result<(), AnyError>>,
   worker_handle: WebWorkerHandle,
@@ -68,7 +61,6 @@ pub type WorkerId = u32;
 
 pub fn init(
   rt: &mut deno_core::JsRuntime,
-  sender: Option<mpsc::Sender<WorkerEvent>>,
   create_web_worker_cb: Arc<CreateWebWorkerCb>,
 ) {
   {
@@ -88,21 +80,6 @@ pub fn init(
   );
   super::reg_json_sync(rt, "op_host_post_message", op_host_post_message);
   super::reg_json_async(rt, "op_host_get_message", op_host_get_message);
-  super::reg_json_sync(
-    rt,
-    "op_host_unhandled_error",
-    move |_state, args, _zero_copy| {
-      if let Some(mut sender) = sender.clone() {
-        let args: HostUnhandledErrorArgs = serde_json::from_value(args)?;
-        sender
-          .try_send(WorkerEvent::Error(generic_error(args.message)))
-          .expect("Failed to propagate error event to parent worker");
-        Ok(json!(true))
-      } else {
-        Err(generic_error("Cannot be called from main worker."))
-      }
-    },
-  );
 }
 
 fn merge_permission_state(
@@ -508,7 +485,7 @@ fn op_create_worker(
       use_deno_namespace,
     });
 
-    // Send thread safe handle to newly created worker to host thread
+    // Send thread safe handle from newly created worker to host thread
     handle_sender.send(Ok(worker.thread_safe_handle())).unwrap();
     drop(handle_sender);
 
@@ -519,6 +496,7 @@ fn op_create_worker(
     run_web_worker(worker, module_specifier, maybe_source_code)
   })?;
 
+  // Receive WebWorkerHandle from newly created worker
   let worker_handle = handle_receiver.recv().unwrap()?;
 
   let worker_thread = WorkerThread {
@@ -560,7 +538,7 @@ fn op_host_terminate_worker(
   Ok(json!({}))
 }
 
-fn serialize_worker_event(event: WorkerEvent) -> Value {
+pub fn serialize_worker_event(event: WorkerEvent) -> Value {
   match event {
     WorkerEvent::Message(buf) => json!({ "type": "msg", "data": buf }),
     WorkerEvent::TerminalError(error) => match error.downcast::<JsError>() {

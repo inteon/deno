@@ -268,7 +268,7 @@
               throw new Error("Unhandled error event reached main worker.");
             } else {
               core.jsonOpSync(
-                "op_host_unhandled_error",
+                "op_worker_unhandled_error",
                 { message: event.error.message },
               );
             }
@@ -287,7 +287,7 @@
               throw new Error("Unhandled error event reached main worker.");
             } else {
               core.jsonOpSync(
-                "op_host_unhandled_error",
+                "op_worker_unhandled_error",
                 { message: event.error.message },
               );
             }
