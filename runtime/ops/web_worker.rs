@@ -1,7 +1,7 @@
 // Copyright 2018-2021 the Deno authors. All rights reserved. MIT license.
 
-use crate::worker_communication::WorkerHandle;
 use crate::worker_communication::WorkerEvent;
+use crate::worker_communication::WorkerHandle;
 use deno_core::error::generic_error;
 use deno_core::error::AnyError;
 use deno_core::futures::channel::mpsc;

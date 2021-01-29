@@ -53,7 +53,7 @@ async fn main() -> Result<(), AnyError> {
     "main".to_string(),
     permissions,
     main_module.clone(),
-    &options
+    &options,
   );
   worker.bootstrap(&options);
   worker.execute_module(&main_module).await?;

@@ -10,12 +10,13 @@ use crate::ops;
 use crate::permissions::Permissions;
 use crate::tokio_util::create_basic_runtime;
 use crate::worker_communication::create_channels;
-use crate::worker_communication::WorkerEvent;
 use crate::worker_communication::WorkerChannelsInternal;
+use crate::worker_communication::WorkerEvent;
 use crate::worker_communication::WorkerHandle;
 use deno_core::error::AnyError;
 use deno_core::futures::future::poll_fn;
 use deno_core::futures::future::FutureExt;
+use deno_core::futures::StreamExt;
 use deno_core::serde_json;
 use deno_core::serde_json::json;
 use deno_core::url::Url;
@@ -26,7 +27,6 @@ use deno_core::ModuleId;
 use deno_core::ModuleLoader;
 use deno_core::ModuleSpecifier;
 use deno_core::RuntimeOptions;
-use deno_core::futures::StreamExt;
 use std::env;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
@@ -37,7 +37,7 @@ use std::task::Poll;
 /// This is the general Worker class.
 /// Each `Worker` is the child of another worker. Except for the
 /// worker with id = 0, this is the `MainWorker`.
-/// 
+///
 /// This struct is an implementation of `Worker` Web API
 pub struct Worker {
   id: u32,
@@ -107,11 +107,12 @@ impl Worker {
 
     let is_main_worker = worker_id == 0;
 
-    let should_break_on_first_statement =
-      is_main_worker && inspector.is_some() && options.should_break_on_first_statement;
+    let should_break_on_first_statement = is_main_worker
+      && inspector.is_some()
+      && options.should_break_on_first_statement;
 
-      let isolate_handle = js_runtime.v8_isolate().thread_safe_handle();
-      let (internal_channels, handle) = create_channels(isolate_handle);
+    let isolate_handle = js_runtime.v8_isolate().thread_safe_handle();
+    let (internal_channels, handle) = create_channels(isolate_handle);
 
     let mut worker = Self {
       id: worker_id,
@@ -127,81 +128,84 @@ impl Worker {
 
     {
       let handle = worker.thread_safe_handle();
-    let js_runtime = &mut worker.js_runtime;
-    {
-      // All ops registered in this function depend on these
+      let js_runtime = &mut worker.js_runtime;
+      {
+        // All ops registered in this function depend on these
+        {
+          let op_state = js_runtime.op_state();
+          let mut op_state = op_state.borrow_mut();
+          op_state.put::<Metrics>(Default::default());
+          op_state.put::<Permissions>(permissions);
+          op_state.put::<ops::UnstableChecker>(ops::UnstableChecker {
+            unstable: options.unstable,
+          });
+        }
+
+        if !is_main_worker {
+          ops::web_worker::init(
+            js_runtime,
+            worker.internal_channels.sender.clone(),
+            worker.internal_channels.receiver.clone(),
+            handle,
+          );
+        }
+        ops::runtime::init(js_runtime, main_module);
+        ops::fetch::init(
+          js_runtime,
+          options.user_agent.clone(),
+          options.ca_data.clone(),
+        );
+        ops::timers::init(js_runtime);
+        ops::worker_host::init(
+          js_runtime,
+          options.create_web_worker_cb.clone(),
+        );
+        ops::reg_json_sync(js_runtime, "op_close", deno_core::op_close);
+        ops::reg_json_sync(js_runtime, "op_resources", deno_core::op_resources);
+        ops::reg_json_sync(
+          js_runtime,
+          "op_domain_to_ascii",
+          deno_web::op_domain_to_ascii,
+        );
+        ops::io::init(js_runtime);
+        ops::websocket::init(
+          js_runtime,
+          options.user_agent.clone(),
+          options.ca_data.clone(),
+        );
+        if options.use_deno_namespace {
+          ops::fs_events::init(js_runtime);
+          ops::fs::init(js_runtime);
+          ops::net::init(js_runtime);
+          ops::os::init(js_runtime);
+          ops::permissions::init(js_runtime);
+          ops::plugin::init(js_runtime);
+          ops::process::init(js_runtime);
+          ops::crypto::init(js_runtime, options.seed);
+          ops::signal::init(js_runtime);
+          ops::tls::init(js_runtime);
+          ops::tty::init(js_runtime);
+        }
+      }
       {
         let op_state = js_runtime.op_state();
         let mut op_state = op_state.borrow_mut();
-        op_state.put::<Metrics>(Default::default());
-        op_state.put::<Permissions>(permissions);
-        op_state.put::<ops::UnstableChecker>(ops::UnstableChecker {
-          unstable: options.unstable,
-        });
+        let t = &mut op_state.resource_table;
+        let (stdin, stdout, stderr) = ops::io::get_stdio();
+        if let Some(stream) = stdin {
+          t.add(stream);
+        }
+        if let Some(stream) = stdout {
+          t.add(stream);
+        }
+        if let Some(stream) = stderr {
+          t.add(stream);
+        }
       }
 
-      if !is_main_worker {
-        ops::web_worker::init(
-          js_runtime,
-          worker.internal_channels.sender.clone(),
-          worker.internal_channels.receiver.clone(),
-          handle,
-        );
-      }
-      ops::runtime::init(js_runtime, main_module);
-      ops::fetch::init(
-        js_runtime,
-        options.user_agent.clone(),
-        options.ca_data.clone(),
-      );
-      ops::timers::init(js_runtime);
-      ops::worker_host::init(js_runtime, options.create_web_worker_cb.clone());
-      ops::reg_json_sync(js_runtime, "op_close", deno_core::op_close);
-      ops::reg_json_sync(js_runtime, "op_resources", deno_core::op_resources);
-      ops::reg_json_sync(
-        js_runtime,
-        "op_domain_to_ascii",
-        deno_web::op_domain_to_ascii,
-      );
-      ops::io::init(js_runtime);
-      ops::websocket::init(
-        js_runtime,
-        options.user_agent.clone(),
-        options.ca_data.clone(),
-      );
-      if options.use_deno_namespace {
-        ops::fs_events::init(js_runtime);
-        ops::fs::init(js_runtime);
-        ops::net::init(js_runtime);
-        ops::os::init(js_runtime);
-        ops::permissions::init(js_runtime);
-        ops::plugin::init(js_runtime);
-        ops::process::init(js_runtime);
-        ops::crypto::init(js_runtime, options.seed);
-        ops::signal::init(js_runtime);
-        ops::tls::init(js_runtime);
-        ops::tty::init(js_runtime);
-      }
+      worker
     }
-    {
-      let op_state = js_runtime.op_state();
-      let mut op_state = op_state.borrow_mut();
-      let t = &mut op_state.resource_table;
-      let (stdin, stdout, stderr) = ops::io::get_stdio();
-      if let Some(stream) = stdin {
-        t.add(stream);
-      }
-      if let Some(stream) = stdout {
-        t.add(stream);
-      }
-      if let Some(stream) = stderr {
-        t.add(stream);
-      }
-    }
-
-    worker
   }
-}
 
   pub fn bootstrap(&mut self, options: &WorkerOptions) {
     let runtime_options = json!({
@@ -226,7 +230,7 @@ impl Worker {
       )
     } else {
       let runtime_options_str =
-      serde_json::to_string_pretty(&runtime_options).unwrap();
+        serde_json::to_string_pretty(&runtime_options).unwrap();
 
       // Instead of using name for log we use `worker-${id}` because
       // WebWorkers can have empty string as name.
@@ -327,7 +331,9 @@ impl Worker {
       }
     }
 
-    if let Poll::Ready(r) = self.internal_channels.terminate_rx.poll_next_unpin(cx) {
+    if let Poll::Ready(r) =
+      self.internal_channels.terminate_rx.poll_next_unpin(cx)
+    {
       // terminate_rx should never be closed
       assert!(r.is_some());
       return Poll::Ready(Ok(()));
@@ -406,7 +412,6 @@ pub fn run_web_worker(
   result
 }
 
-
 #[cfg(test)]
 mod tests {
   // ############ WebWorker tests
@@ -439,7 +444,7 @@ mod tests {
       no_color: true,
       get_error_class_fn: None,
       should_break_on_first_statement: false,
-      location: None
+      location: None,
     };
 
     let mut worker = Worker::from_options(
@@ -571,7 +576,7 @@ mod tests {
       "main".to_string(),
       permissions,
       main_module,
-      &options
+      &options,
     )
   }
 

@@ -126,7 +126,7 @@ fn create_web_worker_callback(
       no_color: !colors::use_color(),
       get_error_class_fn: Some(&crate::errors::get_error_class_name),
       should_break_on_first_statement: false,
-      location: program_state.flags.location.clone()
+      location: program_state.flags.location.clone(),
     };
 
     let mut worker = Worker::from_options(
@@ -212,7 +212,7 @@ pub fn create_main_worker(
     "main".to_string(),
     permissions,
     main_module,
-    &options
+    &options,
   );
 
   // This block registers additional ops and state that

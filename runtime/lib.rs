@@ -23,5 +23,5 @@ pub mod ops;
 pub mod permissions;
 pub mod resolve_addr;
 pub mod tokio_util;
-pub mod worker_communication;
 pub mod worker;
+pub mod worker_communication;
