@@ -23,7 +23,6 @@ use deno_core::JsRuntime;
 use deno_core::ModuleLoader;
 use deno_core::ModuleSpecifier;
 use deno_core::RuntimeOptions;
-use std::cell::RefCell;
 use std::env;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
@@ -44,7 +43,7 @@ pub enum WorkerEvent {
 // Channels used for communication with worker's parent
 pub struct WorkerChannelsInternal {
   pub sender: mpsc::Sender<WorkerEvent>,
-  pub receiver: Rc<RefCell<mpsc::Receiver<Box<[u8]>>>>,
+  pub receiver: Arc<AsyncMutex<mpsc::Receiver<Box<[u8]>>>>,
 }
 
 /// Wrapper for `WorkerHandle` that adds functionality
@@ -102,7 +101,7 @@ fn create_channels(
   let (out_tx, out_rx) = mpsc::channel::<WorkerEvent>(1);
   let internal_channels = WorkerChannelsInternal {
     sender: out_tx,
-    receiver: Rc::new(RefCell::new(in_rx)),
+    receiver: Arc::new(AsyncMutex::new(in_rx)),
   };
   let external_channels = WebWorkerHandle {
     sender: in_tx,

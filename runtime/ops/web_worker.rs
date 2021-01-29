@@ -11,8 +11,8 @@ use deno_core::serde_json;
 use deno_core::serde_json::json;
 use deno_core::serde_json::Value;
 use deno_core::ZeroCopyBuf;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::Arc;
+use tokio::sync::Mutex as AsyncMutex;
 
 #[derive(Deserialize)]
 struct HostUnhandledErrorArgs {
@@ -22,7 +22,7 @@ struct HostUnhandledErrorArgs {
 pub fn init(
   rt: &mut deno_core::JsRuntime,
   sender: mpsc::Sender<WorkerEvent>,
-  receiver: Rc<RefCell<mpsc::Receiver<Box<[u8]>>>>,
+  receiver: Arc<AsyncMutex<mpsc::Receiver<Box<[u8]>>>>,
   webworker_handle: WebWorkerHandle,
 ) {
   super::reg_json_async(
@@ -73,9 +73,9 @@ fn op_worker_unhandled_error(
 
 /// Get message from host as worker
 async fn op_worker_get_message(
-  receiver_ref: Rc<RefCell<mpsc::Receiver<Box<[u8]>>>>,
+  receiver_ref: Arc<AsyncMutex<mpsc::Receiver<Box<[u8]>>>>,
 ) -> Result<Value, AnyError> {
-  let mut receiver = receiver_ref.borrow_mut();
+  let mut receiver = receiver_ref.try_lock()?;
   let maybe_event = receiver.next().await;
 
   if let Some(event) = maybe_event {
