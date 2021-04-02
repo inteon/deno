@@ -133,7 +133,8 @@ where
       }
     };
 
-    match op_fn(&mut state.borrow_mut(), req_header.argument, &mut zero_copy) {
+    let mut state_mut = state.borrow_mut();
+    match op_fn(&mut state_mut, req_header.argument, &mut zero_copy) {
       Ok(possibly_vector) => {
         let resp_header = ResponseHeader {
           request_id: req_header.request_id,
@@ -155,7 +156,7 @@ where
       }
       Err(error) => {
         let error_class =
-          (state.borrow().get_error_class_fn)(&error).as_bytes();
+          (state_mut.get_error_class_fn)(&error).as_bytes();
         let error_message = error.to_string().as_bytes().to_owned();
         let len = error_class.len() + error_message.len();
         let padding = gen_padding_32bit(len);

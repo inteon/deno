@@ -395,6 +395,26 @@ fn run_max_mem_benchmark(deno_exe: &PathBuf) -> Result<HashMap<String, u64>> {
   Ok(results)
 }
 
+fn run_ops_micro_benchmark(
+  target_dir: &Path,
+) -> Result<HashMap<String, HashMap<String, f64>>> {
+  let micro_bench_ops_exe = target_dir.join("examples/micro_bench_ops");
+  let micro_bench_ops_exe = micro_bench_ops_exe.to_str().unwrap();
+
+  let proc = Command::new(micro_bench_ops_exe)
+    .args(&["-s"])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()?;
+
+  let proc_result = proc.wait_with_output()?;
+
+  assert_eq!(proc_result.status.code().unwrap(), 0);
+  let results = serde_json::from_slice(&proc_result.stdout)?;
+
+  Ok(results)
+}
+
 fn cargo_deps() -> usize {
   let cargo_lock = test_util::root_path().join("Cargo.lock");
   let mut count = 0;
@@ -429,6 +449,7 @@ struct BenchResult {
   syscall_count: HashMap<String, u64>,
   thread_count: HashMap<String, u64>,
   throughput: HashMap<String, f64>,
+  ops_micro_benchmark: HashMap<String, HashMap<String, f64>>,
 }
 
 /*
@@ -468,6 +489,7 @@ fn main() -> Result<()> {
     bundle_size: bundle_benchmark(&deno_exe)?,
     cargo_deps: cargo_deps(),
     lsp_exec_time: lsp::benchmarks(&deno_exe)?,
+    ops_micro_benchmark: run_ops_micro_benchmark(&target_dir)?,
     ..Default::default()
   };
 
