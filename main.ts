@@ -27,10 +27,13 @@ if (result.value === 'not-equal') {
 
 w.postMessage(sab);
 
+// Uncomment section below to make code work:
+/*
 setTimeout(() => {
   console.log(i32[0]); // 123 -> the value has changed an this thread is active, so why not resolve waitAsync?
   console.log(result.value);
 }, 600);
+*/
 
 await promise;
 
